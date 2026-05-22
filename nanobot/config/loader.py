@@ -60,7 +60,7 @@ def _apply_ssrf_whitelist(config: Config) -> None:
     """Apply SSRF whitelist from config to the network security module."""
     from nanobot.security.network import configure_ssrf_whitelist
 
-    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
+    configure_ssrf_whitelist(config.tools.ssrf_whitelist, config.tools.allowed_hosts)
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:

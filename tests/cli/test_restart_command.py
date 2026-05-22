@@ -156,6 +156,19 @@ class TestRestartCommand:
         assert "/status" in response.content
         assert response.metadata == {"render_as": "text"}
 
+    def test_command_palette_entries_are_registered(self):
+        from nanobot.command.builtin import BUILTIN_COMMAND_SPECS, register_builtin_commands
+        from nanobot.command.router import CommandRouter
+
+        router = CommandRouter()
+        register_builtin_commands(router)
+
+        for spec in BUILTIN_COMMAND_SPECS:
+            assert router.is_priority(spec.command) or router.is_dispatchable_command(spec.command)
+            if spec.arg_hint:
+                sample = f"{spec.command} sample"
+                assert router.is_priority(sample) or router.is_dispatchable_command(sample)
+
     @pytest.mark.asyncio
     async def test_status_reports_runtime_info(self):
         loop, _bus = _make_loop()
@@ -264,6 +277,27 @@ class TestRestartCommand:
         assert "🤖 Bot: Hi there!" in response.content
         assert "tool result" not in response.content  # tool messages filtered
         assert response.metadata == {"render_as": "text"}
+
+    @pytest.mark.asyncio
+    async def test_history_includes_persisted_command_turns(self):
+        from nanobot.command.builtin import cmd_history
+        from nanobot.command.router import CommandContext
+
+        loop, _bus = _make_loop()
+        session = SimpleNamespace(
+            last_consolidated=0,
+            messages=[
+                {"role": "user", "content": "/help", "_command": True},
+                {"role": "assistant", "content": "Available slash commands...", "_command": True},
+            ],
+        )
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
+        ctx = CommandContext(msg=msg, session=session, key=msg.session_key, raw="/history", loop=loop)
+
+        response = await cmd_history(ctx)
+
+        assert "👤 You: /help" in response.content
+        assert "🤖 Bot: Available slash commands..." in response.content
 
     @pytest.mark.asyncio
     async def test_history_respects_count_argument(self):

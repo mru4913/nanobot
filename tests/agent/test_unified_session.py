@@ -260,6 +260,35 @@ class TestCmdNewUnifiedSession:
         assert reloaded.messages == []
 
     @pytest.mark.asyncio
+    async def test_cmd_new_clears_webui_transcript(self, tmp_path: Path):
+        """WebUI /new clears the rich display transcript as well as Session.messages."""
+        sessions = SessionManager(tmp_path)
+        session = sessions.get_or_create("websocket:chat-a")
+        session.add_message("user", "old visible turn")
+        sessions.save(session)
+
+        loop = SimpleNamespace(
+            sessions=sessions,
+            consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
+            _cancel_active_tasks=AsyncMock(return_value=0),
+        )
+        loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
+
+        msg = InboundMessage(
+            channel="websocket",
+            sender_id="chat-a",
+            chat_id="chat-a",
+            content="/new",
+            metadata={"webui": True},
+        )
+        ctx = CommandContext(msg=msg, session=None, key="websocket:chat-a", raw="/new", loop=loop)
+
+        with patch("nanobot.webui.thread_disk.delete_webui_thread") as delete_thread:
+            await cmd_new(ctx)
+
+        delete_thread.assert_called_once_with("websocket:chat-a")
+
+    @pytest.mark.asyncio
     async def test_cmd_new_in_unified_mode_does_not_affect_other_sessions(self, tmp_path: Path):
         """Clearing unified:default must not touch other sessions on disk."""
         sessions = SessionManager(tmp_path)

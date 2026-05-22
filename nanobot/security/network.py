@@ -24,16 +24,40 @@ _BLOCKED_NETWORKS = [
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+_allowed_hostnames: set[str] = set()
 
 
-def configure_ssrf_whitelist(cidrs: list[str]) -> None:
-    """Allow specific CIDR ranges to bypass SSRF blocking (e.g. Tailscale's 100.64.0.0/10)."""
-    global _allowed_networks
+def _normalize_hostname(hostname: str) -> str:
+    return hostname.strip().lower().rstrip(".")
+
+
+def _is_allowed_hostname_entry(hostname: str) -> bool:
+    if not hostname or "*" in hostname or "/" in hostname or ":" in hostname:
+        return False
+    with suppress(ValueError):
+        ipaddress.ip_address(hostname)
+        return False
+    labels = hostname.split(".")
+    if any(not label or label.startswith("-") or label.endswith("-") for label in labels):
+        return False
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-")
+    return not any(any(ch not in allowed for ch in label) for label in labels)
+
+
+def configure_ssrf_whitelist(cidrs: list[str], hostnames: list[str] | None = None) -> None:
+    """Allow specific CIDR ranges or exact hostnames to bypass SSRF blocking."""
+    global _allowed_networks, _allowed_hostnames
     nets = []
     for cidr in cidrs:
         with suppress(ValueError):
             nets.append(ipaddress.ip_network(cidr, strict=False))
     _allowed_networks = nets
+    _allowed_hostnames = {
+        host
+        for raw in (hostnames or [])
+        if (host := _normalize_hostname(raw))
+        and _is_allowed_hostname_entry(host)
+    }
 
 
 def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -60,6 +84,7 @@ def validate_url_target(url: str) -> tuple[bool, str]:
     hostname = p.hostname
     if not hostname:
         return False, "Missing hostname"
+    hostname_allowed = _normalize_hostname(hostname) in _allowed_hostnames
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -71,7 +96,7 @@ def validate_url_target(url: str) -> tuple[bool, str]:
             addr = ipaddress.ip_address(info[4][0])
         except ValueError:
             continue
-        if _is_private(addr):
+        if _is_private(addr) and not hostname_allowed:
             return False, f"Blocked: {hostname} resolves to private/internal address {addr}"
 
     return True, ""
@@ -87,6 +112,7 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     hostname = p.hostname
     if not hostname:
         return True, ""
+    hostname_allowed = _normalize_hostname(hostname) in _allowed_hostnames
 
     try:
         addr = ipaddress.ip_address(hostname)
@@ -103,7 +129,7 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
                 addr = ipaddress.ip_address(info[4][0])
             except ValueError:
                 continue
-            if _is_private(addr):
+            if _is_private(addr) and not hostname_allowed:
                 return False, f"Redirect target {hostname} resolves to private address {addr}"
 
     return True, ""

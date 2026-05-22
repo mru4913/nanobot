@@ -43,6 +43,16 @@ def sustained_goal_active(metadata: Mapping[str, Any] | None) -> bool:
     return isinstance(goal, dict) and goal.get("status") == "active"
 
 
+def sustained_goal_pending(metadata: Mapping[str, Any] | None) -> bool:
+    """True during the initial ``/goal`` turn before ``long_task`` has written goal state."""
+    if not metadata:
+        return False
+    return (
+        metadata.get("original_command") == "/goal"
+        and metadata.get("goal_started_at") is not None
+    )
+
+
 def parse_goal_state(blob: Any) -> dict[str, Any] | None:
     if blob is None:
         return None
@@ -108,4 +118,4 @@ def runner_wall_llm_timeout_s(
     meta: Mapping[str, Any] | None = metadata
     if meta is None and session_key:
         meta = sessions.get_or_create(session_key).metadata
-    return 0.0 if sustained_goal_active(meta) else None
+    return 0.0 if sustained_goal_active(meta) or sustained_goal_pending(meta) else None

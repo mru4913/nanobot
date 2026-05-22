@@ -10,6 +10,7 @@ from nanobot.session.goal_state import (
     parse_goal_state,
     runner_wall_llm_timeout_s,
     sustained_goal_active,
+    sustained_goal_pending,
 )
 from nanobot.session.manager import SessionManager
 
@@ -109,6 +110,12 @@ def test_sustained_goal_active_respects_legacy_thread_goal_key():
     assert sustained_goal_active(meta) is True
 
 
+def test_sustained_goal_pending_true_for_initial_goal_turn():
+    assert sustained_goal_pending({"original_command": "/goal", "goal_started_at": 123.0}) is True
+    assert sustained_goal_pending({"original_command": "/history", "goal_started_at": 123.0}) is False
+    assert sustained_goal_pending({"original_command": "/goal"}) is False
+
+
 def test_runner_wall_llm_timeout_uses_metadata_override(tmp_path):
     sm = SessionManager(tmp_path)
     assert (
@@ -120,6 +127,18 @@ def test_runner_wall_llm_timeout_uses_metadata_override(tmp_path):
         == 0.0
     )
     assert runner_wall_llm_timeout_s(sm, "cli:test", metadata={}) is None
+
+
+def test_runner_wall_llm_timeout_disables_for_initial_goal_turn(tmp_path):
+    sm = SessionManager(tmp_path)
+    assert (
+        runner_wall_llm_timeout_s(
+            sm,
+            "cli:test",
+            metadata={"original_command": "/goal", "goal_started_at": 123.0},
+        )
+        == 0.0
+    )
 
 
 def test_runner_wall_llm_timeout_reads_session_when_metadata_missing(tmp_path):

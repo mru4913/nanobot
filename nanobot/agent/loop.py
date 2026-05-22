@@ -744,6 +744,10 @@ class AgentLoop:
 
         active_session_key = session.key if session else session_key
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
+        llm_timeout_metadata: dict[str, Any] = {}
+        if session is not None:
+            llm_timeout_metadata.update(session.metadata)
+        llm_timeout_metadata.update(metadata or {})
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
@@ -769,7 +773,7 @@ class AgentLoop:
                 llm_timeout_s=runner_wall_llm_timeout_s(
                     self.sessions,
                     session.key if session is not None else session_key,
-                    metadata=(session.metadata if session is not None else None),
+                    metadata=llm_timeout_metadata,
                 ),
             ))
         finally:

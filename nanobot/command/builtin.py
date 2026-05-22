@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Any
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
@@ -207,6 +208,11 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.invalidate(session.key)
     if snapshot:
         loop._schedule_background(loop.consolidator.archive(snapshot))
+    if ctx.msg.channel == "websocket" and ctx.msg.metadata.get("webui"):
+        with suppress(Exception):
+            from nanobot.webui.thread_disk import delete_webui_thread
+
+            delete_webui_thread(ctx.key)
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -517,6 +523,23 @@ def _format_history_message(msg: dict) -> str | None:
     return f"{label}: {content}"
 
 
+def _display_history(session: Any) -> list[dict]:
+    """Return persisted messages for the user-facing /history command.
+
+    ``Session.get_history()`` intentionally filters command turns because it is
+    primarily used for LLM replay.  The slash command is a user-facing transcript
+    view, so it should include persisted command exchanges too.
+    """
+    messages = getattr(session, "messages", None)
+    if isinstance(messages, list):
+        try:
+            last_consolidated = int(getattr(session, "last_consolidated", 0))
+        except (TypeError, ValueError):
+            last_consolidated = 0
+        return messages[max(0, last_consolidated):]
+    return session.get_history(max_messages=0)
+
+
 async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     """Show the last N messages of the current session (default 10, max 50).
 
@@ -534,7 +557,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
             )
 
     session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
-    history = session.get_history(max_messages=0)
+    history = _display_history(session)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
     recent = visible[-count:]
